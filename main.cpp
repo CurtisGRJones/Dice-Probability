@@ -1,8 +1,67 @@
 #include <cstdio>
 #include <string>
 #include <algorithm>
+#include <cmath>
+#include <thread>
+#include <queue>
+#include <vector>
+
+// Debug
+#include<unistd.h> 
 
 #define EXPECTED_ARG_COUNT 5
+
+// TODO put this in its own files
+class Lock {
+public:
+    static std::queue<int> *queue;
+    static int *lock;
+    // TODO add setters and getters
+
+    static void waitForLock(int threadId) {
+        printf("queue empty?: %d\n", Lock::queue->empty());
+        printf("queue length: %lu\n", Lock::queue->size());
+        if ( *(Lock::lock) == -1 && Lock::queue->empty()) {
+            std::printf("Locking for thread %d due to no thread using lock %d\n", threadId, *(Lock::lock));
+            // TODO make a setlock function for this
+            *(Lock::lock) = threadId;
+            return;
+        }
+
+        Lock::queue->push(threadId);
+
+        if (*(Lock::lock) != threadId) {
+            std::printf("Thread %d waiting for lock\n", threadId);
+        }
+
+        while(*(Lock::lock) != threadId){
+            if( *(Lock::lock) == -1 && Lock::queue->front() == threadId ) {
+                *(Lock::lock) = Lock::queue->front();
+                Lock::queue->pop();
+            }
+        };
+    }
+
+    static void unlock(int threadId) {
+        if(*(Lock::lock) != -1 && *(Lock::lock) != threadId) {
+            std::printf("Thread %d tried to unlock when thread %d was active\n", threadId, *(Lock::lock));
+            return;
+        }
+
+        std::printf("Thread %d released lock\n", threadId);
+
+        if ( ! Lock::queue->empty() ) {
+            *(Lock::lock) = Lock::queue->front();
+            Lock::queue->pop();
+        } else {
+            std::printf("Empty Queue\n");
+            *(Lock::lock) = -1;
+        }
+    }
+};
+
+std::queue<int> *Lock::queue = new std::queue<int>();
+int *Lock::lock = new int(-1);
 
 bool intagerValidator(const std::string& str){
     return !str.empty() && std::find_if(
@@ -13,18 +72,34 @@ bool intagerValidator(const std::string& str){
         }) == str.end();
 }
 
-bool itterateDice(int *dice, const int count, const int maxValue) {
+bool itterateDice(std::vector<int> *dice, const int count, const int maxValue) {
     for( int i = 0; i < count; i++ ) {
-        if( dice[i] < maxValue ) {
-            dice[i]++;
+        if( dice->at(i) < maxValue ) {
+            (*dice)[i]++;
             return true;
         } else {
-            dice[i] = 1;
+            (*dice)[i] = 1;
             continue;
         }
     }
 
     return false;
+}
+
+int countDice(std::vector<int> *dice, const int count) {
+    int total = 0;
+    for ( int i = 0; i < count; i++ ) {
+        total += (*dice)[i];
+    }
+    return total;
+}
+
+void threadJob(std::vector<int> dice, const int count, double* results, int threadId) {
+    int total = countDice(&dice, count);
+    printf("Thread %d result: %d\n", threadId, total);
+    Lock::waitForLock(threadId);
+    results[total - count]++;
+    Lock::unlock(threadId);
 }
 
 int main(int argc, char **argv) {
@@ -56,33 +131,46 @@ int main(int argc, char **argv) {
     int diceCount = std::stoi( diceCountStr );
     int diceMaxValue = std::stoi( diceMaxValueStr );
 
+    // TODO use nCr calculation
+    double grandTotal = pow(diceMaxValue, diceCount);
+    printf("total: %.0f\n", grandTotal);
+
     int min = diceCount;
     int max = diceCount * diceMaxValue;
 
     // TODO valudate expected is within min & max
-    // TODO put limits on number of dice
+    // TODO put limits on number of dice eg. no of dice != 0
 
-    int *dice = new int[diceCount];
-    std::fill_n(dice, diceCount, 1);
+    std::vector<int> dice = std::vector<int>(diceCount, 1);
     
     int totalsCountLength = max-min + 1;
 
-    int *totalsCount = new int[totalsCountLength];
+    double *totalsCount = new double[totalsCountLength];
     std::fill_n(totalsCount, totalsCountLength, 0);
+    // TODO reduce this to only track roles needed for calculation
 
-    int grandTotal = 0;
+    const int ThreadCount = grandTotal;
 
-
+    std::thread *threads = new std::thread[ThreadCount];
+    int threadId = 0;
+    // TODO have threads configurable and each thread have there own queue
     do {
-        int total = 0;
-        for ( int i = 0; i < diceCount; i++ ) {
-            //printf("%d ", dice[i]);
-            total += dice[i];
+        printf("Queueing job\n");
+        threads[threadId] = std::thread([dice, diceCount, totalsCount, threadId]() {
+            threadJob(dice, diceCount, totalsCount, threadId);
+        }); 
+        threadId++;
+        if (threadId >= ThreadCount) {
+            break;
         }
-        //printf("\n");
-        totalsCount[total - min] += 1;
-    } while (itterateDice(dice, diceCount, diceMaxValue));
+    } while (itterateDice(&dice, diceCount, diceMaxValue));
 
-    printf("%d: %d\n", min, totalsCount[0]);
-    printf("total: %d\n", grandTotal);
+    for (int i = 0; i < ThreadCount; i++) {
+        threads[i].join();
+    }
+
+    for (int i = 0; i <= max-min; i++) {
+        printf("%d: %f\n", i+min, totalsCount[i]);
+    }
+        // TODO ensure cleanup
 }

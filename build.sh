@@ -5,5 +5,5 @@ fi
 
 
 # TODO find better way to compile everything
-g++ -o dest/dice-prob \
-       main.cpp       
+g++ -pthread -o dest/dice-prob \
+                main.cpp       
